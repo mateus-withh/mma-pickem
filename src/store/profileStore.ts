@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import { seedInitialData } from '@/db'
 import * as profileService from '@/services/profileService'
 import { computeWalletSummary } from '@/services/walletService'
 import type { Profile } from '@/types/profile'
@@ -34,7 +33,8 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     if (get().hasInitialized) return
     set({ isLoading: true, error: null })
     try {
-      await seedInitialData()
+      // Sem seed local: os perfis (Matheus e Amigo) vivem no banco compartilhado,
+      // criados uma única vez pelo seed.sql ou pela importação do backup.
       await get().refresh()
       set({ hasInitialized: true })
     } catch (err) {

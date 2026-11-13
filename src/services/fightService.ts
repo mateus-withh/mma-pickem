@@ -1,11 +1,14 @@
-import { db } from '@/db/schema'
+import { supabase } from '@/lib/supabase'
+import { fromRow, fromRows, toRow, unwrap } from '@/lib/supabaseHelpers'
 import { generateId } from '@/utils/id'
 import { isValidAmericanOdd } from '@/utils/odds'
 import type { Fight } from '@/types/fight'
 
 export async function listFightsByEvent(eventId: string): Promise<Fight[]> {
-  const fights = await db.fights.where('eventId').equals(eventId).toArray()
-  return fights.sort((a, b) => a.cardPosition - b.cardPosition)
+  const rows = unwrap(
+    await supabase.from('fights').select('*').eq('event_id', eventId).order('card_position'),
+  )
+  return fromRows<Fight>(rows)
 }
 
 export interface CreateFightInput {
@@ -45,64 +48,25 @@ function assertValidFightInput(input: CreateFightInput | UpdateFightInput): void
 }
 
 /**
- * Garante que exista no máximo uma luta marcada como Main Event e uma
- * marcada como Co-Main Event por evento — ao marcar uma nova, desmarca
- * as demais do mesmo evento.
+ * No máximo uma luta Main Event e uma Co-Main por evento: ao marcar uma nova,
+ * o próprio banco desmarca as demais (trigger trg_fights_highlight).
  */
-async function enforceSingleCardHighlight(
-  eventId: string,
-  fightIdToSkip: string | undefined,
-  changes: { isMainEvent?: boolean; isCoMainEvent?: boolean },
-): Promise<void> {
-  const siblings = await db.fights.where('eventId').equals(eventId).toArray()
-
-  if (changes.isMainEvent) {
-    for (const sibling of siblings) {
-      if (sibling.id !== fightIdToSkip && sibling.isMainEvent) {
-        await db.fights.update(sibling.id, { isMainEvent: false })
-      }
-    }
-  }
-
-  if (changes.isCoMainEvent) {
-    for (const sibling of siblings) {
-      if (sibling.id !== fightIdToSkip && sibling.isCoMainEvent) {
-        await db.fights.update(sibling.id, { isCoMainEvent: false })
-      }
-    }
-  }
-}
-
 export async function createFight(input: CreateFightInput): Promise<Fight> {
   assertValidFightInput(input)
 
-  const now = new Date().toISOString()
-  const fight: Fight = {
-    id: generateId(),
-    eventId: input.eventId,
-    fighterAName: input.fighterAName.trim(),
-    fighterBName: input.fighterBName.trim(),
-    weightClass: input.weightClass,
-    rounds: input.rounds,
-    cardPosition: input.cardPosition,
-    isMainEvent: input.isMainEvent,
-    isCoMainEvent: input.isCoMainEvent,
-    isTitleFight: input.isTitleFight,
-    oddFighterA: input.oddFighterA,
-    oddFighterB: input.oddFighterB,
-    createdAt: now,
-    updatedAt: now,
-  }
-
-  await db.transaction('rw', db.fights, async () => {
-    await db.fights.add(fight)
-    await enforceSingleCardHighlight(input.eventId, fight.id, {
-      isMainEvent: input.isMainEvent,
-      isCoMainEvent: input.isCoMainEvent,
-    })
-  })
-
-  return fight
+  const row = unwrap(
+    await supabase
+      .from('fights')
+      .insert({
+        ...toRow(input),
+        id: generateId(),
+        fighter_a_name: input.fighterAName.trim(),
+        fighter_b_name: input.fighterBName.trim(),
+      })
+      .select()
+      .single(),
+  )
+  return fromRow<Fight>(row)
 }
 
 export type UpdateFightInput = Partial<Omit<CreateFightInput, 'eventId'>>
@@ -110,22 +74,22 @@ export type UpdateFightInput = Partial<Omit<CreateFightInput, 'eventId'>>
 export async function updateFight(id: string, changes: UpdateFightInput): Promise<void> {
   assertValidFightInput(changes)
 
-  const existing = await db.fights.get(id)
-  if (!existing) throw new Error('Luta não encontrada.')
-
   const patch: UpdateFightInput = { ...changes }
   if (patch.fighterAName !== undefined) patch.fighterAName = patch.fighterAName.trim()
   if (patch.fighterBName !== undefined) patch.fighterBName = patch.fighterBName.trim()
 
-  await db.transaction('rw', db.fights, async () => {
-    await db.fights.update(id, { ...patch, updatedAt: new Date().toISOString() })
-    await enforceSingleCardHighlight(existing.eventId, id, {
-      isMainEvent: changes.isMainEvent,
-      isCoMainEvent: changes.isCoMainEvent,
-    })
-  })
+  const updated = unwrap(await supabase.from('fights').update(toRow(patch)).eq('id', id).select('id'))
+  if (!updated || updated.length === 0) throw new Error('Luta não encontrada.')
 }
 
+/** O banco bloqueia a exclusão de uma luta que já tem apostas. */
 export async function deleteFight(id: string): Promise<void> {
-  await db.fights.delete(id)
+  const { error } = await supabase.from('fights').delete().eq('id', id)
+  if (error) {
+    throw new Error(
+      error.code === '23503'
+        ? 'Não é possível excluir esta luta: já existem apostas nela.'
+        : error.message,
+    )
+  }
 }

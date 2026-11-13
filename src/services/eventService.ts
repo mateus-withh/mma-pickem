@@ -1,14 +1,17 @@
-import { db } from '@/db/schema'
+import { supabase } from '@/lib/supabase'
+import { fromRow, fromRows, toRow, unwrap } from '@/lib/supabaseHelpers'
 import { generateId } from '@/utils/id'
 import type { MmaEvent, EventType, EventStatus } from '@/types/event'
 
 export async function listEvents(): Promise<MmaEvent[]> {
-  const events = await db.events.toArray()
+  const rows = unwrap(await supabase.from('events').select('*'))
+  const events = fromRows<MmaEvent>(rows)
   return events.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
 }
 
 export async function getEvent(id: string): Promise<MmaEvent | undefined> {
-  return db.events.get(id)
+  const row = unwrap(await supabase.from('events').select('*').eq('id', id).maybeSingle())
+  return row ? fromRow<MmaEvent>(row) : undefined
 }
 
 export interface CreateEventInput {
@@ -25,21 +28,22 @@ export async function createEvent(input: CreateEventInput): Promise<MmaEvent> {
   if (!name) throw new Error('O nome do evento é obrigatório.')
   if (!input.date) throw new Error('A data do evento é obrigatória.')
 
-  const now = new Date().toISOString()
-  const event: MmaEvent = {
-    id: generateId(),
-    name,
-    date: input.date,
-    location: input.location.trim(),
-    arena: input.arena.trim(),
-    type: input.type,
-    status: input.status,
-    createdAt: now,
-    updatedAt: now,
-  }
-
-  await db.events.add(event)
-  return event
+  const row = unwrap(
+    await supabase
+      .from('events')
+      .insert({
+        id: generateId(),
+        name,
+        date: input.date,
+        location: input.location.trim(),
+        arena: input.arena.trim(),
+        type: input.type,
+        status: input.status,
+      })
+      .select()
+      .single(),
+  )
+  return fromRow<MmaEvent>(row)
 }
 
 export type UpdateEventInput = Partial<CreateEventInput>
@@ -51,13 +55,20 @@ export async function updateEvent(id: string, changes: UpdateEventInput): Promis
     changes = { ...changes, name: trimmed }
   }
 
-  await db.events.update(id, { ...changes, updatedAt: new Date().toISOString() })
+  unwrap(await supabase.from('events').update(toRow(changes)).eq('id', id))
 }
 
-/** Remove o evento e todas as suas lutas (ainda não existem apostas nas Fases 1-3). */
+/**
+ * Remove o evento e todas as suas lutas. O banco bloqueia a exclusão se
+ * alguma luta do evento já tiver apostas (para nunca bagunçar os saldos).
+ */
 export async function deleteEvent(id: string): Promise<void> {
-  await db.transaction('rw', db.events, db.fights, async () => {
-    await db.fights.where('eventId').equals(id).delete()
-    await db.events.delete(id)
-  })
+  const { error } = await supabase.from('events').delete().eq('id', id)
+  if (error) {
+    throw new Error(
+      error.code === '23503'
+        ? 'Não é possível excluir este evento: já existem apostas nas lutas dele.'
+        : error.message,
+    )
+  }
 }

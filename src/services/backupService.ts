@@ -1,6 +1,18 @@
 import { z } from 'zod'
-import { db } from '@/db/schema'
-import type { BackupData } from '@/types/backup'
+import { supabase } from '@/lib/supabase'
+import { fromRows, toRow, unwrap } from '@/lib/supabaseHelpers'
+import type {
+  AppSettings,
+  Bet,
+  BackupData,
+  Fight,
+  FightOutcome,
+  FightResult,
+  MmaEvent,
+  Profile,
+  ResultAuditEntry,
+  Transaction,
+} from '@/types'
 
 const BACKUP_FORMAT_VERSION = 1
 
@@ -117,19 +129,29 @@ const backupDataSchema = z.object({
   resultAudits: z.array(resultAuditSchema),
 })
 
+async function fetchTable<T>(table: string): Promise<T[]> {
+  const rows = unwrap(await supabase.from(table).select('*'))
+  return fromRows<T>(rows)
+}
+
+/** Exporta TODOS os dados que estão hoje no Supabase. */
 export async function exportBackup(): Promise<BackupData> {
-  const [profiles, transactions, settings, events, fights, bets, results, resultAudits] = await Promise.all(
-    [
-      db.profiles.toArray(),
-      db.transactions.toArray(),
-      db.settings.toArray(),
-      db.events.toArray(),
-      db.fights.toArray(),
-      db.bets.toArray(),
-      db.results.toArray(),
-      db.resultAudits.toArray(),
-    ],
-  )
+  const [profiles, transactions, settings, events, fights, bets, results, auditRows] = await Promise.all([
+    fetchTable<Profile>('profiles'),
+    fetchTable<Transaction>('transactions'),
+    fetchTable<AppSettings>('app_settings'),
+    fetchTable<MmaEvent>('events'),
+    fetchTable<Fight>('fights'),
+    fetchTable<Bet>('bets'),
+    fetchTable<FightResult>('results'),
+    supabase.from('result_audits').select('*').then((res) => unwrap(res) as Array<Record<string, unknown>>),
+  ])
+
+  // previousOutcome é null (e não "ausente") na primeira vez que o resultado é registrado.
+  const resultAudits = auditRows.map((row) => ({
+    ...fromRows<ResultAuditEntry>([row])[0],
+    previousOutcome: (row.previous_outcome as FightOutcome | null) ?? null,
+  }))
 
   return {
     formatVersion: BACKUP_FORMAT_VERSION,
@@ -189,7 +211,8 @@ export async function readBackupFile(file: File): Promise<BackupData> {
 export type ImportMode = 'merge' | 'replace'
 
 /**
- * Importa um backup já validado.
+ * Importa um backup já validado para o Supabase, numa única transação
+ * (função import_backup): se qualquer registro falhar, nada é importado.
  * - "merge": faz upsert em todas as tabelas — nada é apagado, apenas
  *   adicionado ou atualizado (registros com o mesmo ID são sobrescritos
  *   pelos do arquivo).
@@ -197,33 +220,16 @@ export type ImportMode = 'merge' | 'replace'
  *   explícita é responsabilidade da UI, nunca feita aqui silenciosamente.
  */
 export async function importBackup(data: BackupData, mode: ImportMode): Promise<void> {
-  await db.transaction(
-    'rw',
-    [db.profiles, db.transactions, db.settings, db.events, db.fights, db.bets, db.results, db.resultAudits],
-    async () => {
-      if (mode === 'replace') {
-        await Promise.all([
-          db.profiles.clear(),
-          db.transactions.clear(),
-          db.settings.clear(),
-          db.events.clear(),
-          db.fights.clear(),
-          db.bets.clear(),
-          db.results.clear(),
-          db.resultAudits.clear(),
-        ])
-      }
+  const payload = {
+    profiles: data.profiles.map((row) => toRow(row)),
+    app_settings: data.settings.map((row) => toRow(row)),
+    events: data.events.map((row) => toRow(row)),
+    fights: data.fights.map((row) => toRow(row)),
+    bets: data.bets.map((row) => toRow(row)),
+    transactions: data.transactions.map((row) => toRow(row)),
+    results: data.results.map((row) => toRow(row)),
+    result_audits: data.resultAudits.map((row) => toRow(row)),
+  }
 
-      await Promise.all([
-        db.profiles.bulkPut(data.profiles),
-        db.transactions.bulkPut(data.transactions),
-        db.settings.bulkPut(data.settings),
-        db.events.bulkPut(data.events),
-        db.fights.bulkPut(data.fights),
-        db.bets.bulkPut(data.bets),
-        db.results.bulkPut(data.results),
-        db.resultAudits.bulkPut(data.resultAudits),
-      ])
-    },
-  )
+  unwrap(await supabase.rpc('import_backup', { p_data: payload, p_mode: mode }))
 }
