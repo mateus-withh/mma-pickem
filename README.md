@@ -4,7 +4,7 @@ Aplicação pessoal para gerenciar Pick'ems e apostas fictícias de MMA/UFC entr
 
 > **Sem dinheiro real.** Nenhuma integração com casas de apostas, nenhum processamento de pagamentos. Tudo roda localmente no navegador, com dados salvos em IndexedDB.
 
-## Status do projeto — Fase 8 concluída ✅ (plano completo!)
+## Status do projeto - Fase 8 concluída ✅ (plano completo!)
 
 **Todas as 8 fases do plano original estão prontas.**
 
