@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { supabase } from '@/lib/supabase'
 import * as profileService from '@/services/profileService'
 import { computeWalletSummary } from '@/services/walletService'
 import type { Profile } from '@/types/profile'
@@ -9,6 +10,10 @@ interface ProfileState {
   profiles: Profile[]
   transactions: Transaction[]
   wallets: Record<string, WalletSummary>
+  /** Perfil vinculado ao login atual (null se o login ainda não foi vinculado a um perfil). */
+  myProfileId: string | null
+  /** O perfil do login atual é administrador? */
+  isAdmin: boolean
   isLoading: boolean
   error: string | null
   hasInitialized: boolean
@@ -25,6 +30,8 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
   profiles: [],
   transactions: [],
   wallets: {},
+  myProfileId: null,
+  isAdmin: false,
   isLoading: false,
   error: null,
   hasInitialized: false,
@@ -33,8 +40,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     if (get().hasInitialized) return
     set({ isLoading: true, error: null })
     try {
-      // Sem seed local: os perfis (Matheus e Amigo) vivem no banco compartilhado,
-      // criados uma única vez pelo seed.sql ou pela importação do backup.
+      // Sem seed local: os perfis (Matheus e Amigo) vivem no banco compartilhado.
       await get().refresh()
       set({ hasInitialized: true })
     } catch (err) {
@@ -45,14 +51,25 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
   },
 
   refresh: async () => {
-    const [profiles, transactions] = await Promise.all([
+    const [profiles, transactions, sessionResult] = await Promise.all([
       profileService.listProfiles(),
       profileService.listTransactions(),
+      supabase.auth.getSession(),
     ])
     const wallets = Object.fromEntries(
       profiles.map((profile) => [profile.id, computeWalletSummary(profile.id, transactions)]),
     )
-    set({ profiles, transactions, wallets })
+
+    const userId = sessionResult.data.session?.user.id
+    const me = userId ? profiles.find((profile) => profile.userId === userId) : undefined
+
+    set({
+      profiles,
+      transactions,
+      wallets,
+      myProfileId: me?.id ?? null,
+      isAdmin: me?.isAdmin === true,
+    })
   },
 
   createProfile: async (input) => {

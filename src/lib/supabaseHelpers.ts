@@ -4,8 +4,14 @@ const toSnake = (key: string) => key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase(
 const toCamel = (key: string) => key.replace(/_([a-z0-9])/g, (_, c: string) => c.toUpperCase())
 
 /** Lança um Error com a mensagem do banco (as funções SQL já devolvem mensagens em português). */
-export function unwrap<T>(res: { data: T | null; error: { message: string } | null }): T {
-  if (res.error) throw new Error(res.error.message)
+export function unwrap<T>(res: { data: T | null; error: { message: string; code?: string } | null }): T {
+  if (res.error) {
+    // 42501 = bloqueado pelas regras de acesso do banco (RLS)
+    if (res.error.code === '42501') {
+      throw new Error('Você não tem permissão para fazer isso. Apenas o administrador pode.')
+    }
+    throw new Error(res.error.message)
+  }
   return res.data as T
 }
 

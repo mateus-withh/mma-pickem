@@ -1,6 +1,5 @@
 import { supabase } from '@/lib/supabase'
 import { fromRow, fromRows, toRow, unwrap } from '@/lib/supabaseHelpers'
-import { generateId } from '@/utils/id'
 import type { Profile } from '@/types/profile'
 import type { Transaction } from '@/types/transaction'
 
@@ -64,12 +63,10 @@ export async function adjustBalance(profileId: string, amount: number, reason: s
   if (!trimmedReason) throw new Error('Informe um motivo para o ajuste.')
 
   unwrap(
-    await supabase.from('transactions').insert({
-      id: generateId(),
-      profile_id: profileId,
-      type: 'MANUAL_ADJUSTMENT',
-      amount,
-      description: trimmedReason,
+    await supabase.rpc('adjust_balance', {
+      p_profile: profileId,
+      p_amount: amount,
+      p_reason: trimmedReason,
     }),
   )
 }
