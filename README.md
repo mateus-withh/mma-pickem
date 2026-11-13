@@ -1,8 +1,8 @@
-# Pick'em Arena — UFC Points League
+# Pick'em Arena - UFC Points League
 
 Aplicação pessoal para gerenciar Pick'ems e apostas fictícias de MMA/UFC entre amigos, usando uma moeda 100% fictícia chamada **UFC Points**.
 
-> ⚠️ **Sem dinheiro real.** Nenhuma integração com casas de apostas, nenhum processamento de pagamentos. Tudo roda localmente no navegador, com dados salvos em IndexedDB.
+> **Sem dinheiro real.** Nenhuma integração com casas de apostas, nenhum processamento de pagamentos. Tudo roda localmente no navegador, com dados salvos em IndexedDB.
 
 ## Status do projeto — Fase 8 concluída ✅ (plano completo!)
 
@@ -107,7 +107,7 @@ src/
 
 ## Funcionalidades propositalmente fora do escopo (conforme o brief)
 
-Método da vitória, Round, Over/Under, Parlay, múltiplas apostas, mais jogadores, login, sincronização online, ranking global, temporadas, conquistas/badges, gráficos e integração com API de MMA — a arquitetura (tipos, serviços) já tem espaço reservado para a maioria dessas expansões futuras, mas nenhuma foi implementada.
+Método da vitória, Round, Over/Under, Parlay, múltiplas apostas, mais jogadores, login, sincronização online, ranking global, temporadas, conquistas/badges, gráficos e integração com API de MMA, a arquitetura (tipos, serviços) já tem espaço reservado para a maioria dessas expansões futuras, mas nenhuma foi implementada.
 
 ## Stack
 
